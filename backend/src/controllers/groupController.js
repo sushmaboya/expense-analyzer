@@ -40,17 +40,18 @@ async function createGroup(req, res) {
   }
 }
 
-// List all groups joined or created by user
+// List all active groups joined or created by user
 async function listGroups(req, res) {
   try {
     const userId = req.user.id;
 
     const groupMemberships = await prisma.groupMember.findMany({
-      where: { userId: userId },
+      where: { userId: userId, leftAt: null },
       include: {
         group: {
           include: {
             members: {
+              where: { leftAt: null },
               include: {
                 user: {
                   select: {
@@ -103,7 +104,7 @@ async function addGroupMember(req, res) {
       return res.status(404).json({ error: 'Group not found.' });
     }
 
-    // Check if user is already a member
+    // Check if user already has a membership record
     const existingMember = await prisma.groupMember.findUnique({
       where: {
         groupId_userId: {
@@ -113,27 +114,52 @@ async function addGroupMember(req, res) {
       }
     });
 
-    if (existingMember) {
+    if (existingMember && existingMember.leftAt === null) {
       return res.status(400).json({ error: 'User is already a member of this group.' });
     }
 
-    // Add member
-    const newMember = await prisma.groupMember.create({
-      data: {
-        groupId,
-        userId: targetUser.id
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatarUrl: true
+    let newMember;
+    if (existingMember && existingMember.leftAt !== null) {
+      newMember = await prisma.groupMember.update({
+        where: {
+          groupId_userId: {
+            groupId: groupId,
+            userId: targetUser.id
+          }
+        },
+        data: {
+          joinedAt: new Date(),
+          leftAt: null
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatarUrl: true
+            }
           }
         }
-      }
-    });
+      });
+    } else {
+      newMember = await prisma.groupMember.create({
+        data: {
+          groupId,
+          userId: targetUser.id
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatarUrl: true
+            }
+          }
+        }
+      });
+    }
 
     return res.status(201).json({
       message: 'Member added successfully!',
@@ -145,7 +171,7 @@ async function addGroupMember(req, res) {
   }
 }
 
-// Remove group member
+// Remove group member by marking them left
 async function removeGroupMember(req, res) {
   try {
     const groupId = parseInt(req.params.id);
@@ -169,13 +195,19 @@ async function removeGroupMember(req, res) {
       return res.status(404).json({ error: 'User is not a member of this group.' });
     }
 
-    // Perform delete
-    await prisma.groupMember.delete({
+    if (membership.leftAt !== null) {
+      return res.status(400).json({ error: 'User has already left the group.' });
+    }
+
+    await prisma.groupMember.update({
       where: {
         groupId_userId: {
           groupId,
           userId: removeUserId
         }
+      },
+      data: {
+        leftAt: new Date()
       }
     });
 

@@ -1,4 +1,5 @@
 const prisma = require('../utils/db');
+const { convertToBaseCurrency, normalizeCurrency, isSupportedCurrency } = require('../utils/currency');
 
 // Create Expense
 async function createExpense(req, res) {
@@ -22,11 +23,31 @@ async function createExpense(req, res) {
       return res.status(400).json({ error: 'Split type must be EQUAL, EXACT, or PERCENTAGE.' });
     }
 
+    const normalizedCurrency = normalizeCurrency(currency || 'INR');
+    if (!isSupportedCurrency(normalizedCurrency)) {
+      return res.status(400).json({ error: 'Currency must be INR or USD.' });
+    }
+
+    const expenseDate = date ? new Date(date) : new Date();
+    if (isNaN(expenseDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid expense date.' });
+    }
+
     // Check if group exists
     const group = await prisma.group.findUnique({
       where: { id: parseInt(groupId) },
       include: {
-        members: true
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+                name: true
+              }
+            }
+          }
+        }
       }
     });
 
@@ -34,37 +55,54 @@ async function createExpense(req, res) {
       return res.status(404).json({ error: 'Group not found.' });
     }
 
-    // Verify paidById is a member
-    const isPayerMember = group.members.some(m => m.userId === parseInt(paidById));
-    if (!isPayerMember) {
-      return res.status(400).json({ error: 'Payer must be a member of the group.' });
+    const findMembership = (userId) => group.members.find(m => m.userId === parseInt(userId));
+    const isMemberActiveAt = (membership, dateObj) => {
+      if (!membership) return false;
+      const joinedAt = new Date(membership.joinedAt);
+      const leftAt = membership.leftAt ? new Date(membership.leftAt) : null;
+      if (dateObj < joinedAt) return false;
+      if (leftAt && dateObj > leftAt) return false;
+      return true;
+    };
+
+    // Verify paidById is an active member at the expense date
+    const payerMembership = findMembership(paidById);
+    if (!isMemberActiveAt(payerMembership, expenseDate)) {
+      return res.status(400).json({ error: 'Payer must be an active member of the group for the selected expense date.' });
     }
 
     // Determine target shares
     let calculatedShares = [];
+    const activeMembers = group.members.filter(m => isMemberActiveAt(m, expenseDate));
 
     if (splitType === 'EQUAL') {
-      // If shares array is empty or not provided, split among all group members
       let targetUserIds = [];
       if (!shares || shares.length === 0) {
-        targetUserIds = group.members.map(m => m.userId);
+        targetUserIds = activeMembers.map(m => m.userId);
       } else {
         targetUserIds = shares.map(s => parseInt(s.userId));
       }
 
       if (targetUserIds.length === 0) {
-        return res.status(400).json({ error: 'No members specified to split with.' });
+        return res.status(400).json({ error: 'No active members are available to split with on the selected expense date.' });
+      }
+
+      const invalidMember = targetUserIds.find(uId => !activeMembers.some(m => m.userId === uId));
+      if (invalidMember) {
+        return res.status(400).json({ error: 'One or more split members are not active on the selected expense date.' });
       }
 
       const count = targetUserIds.length;
       const shareAmount = Math.round((numericAmount / count) * 100) / 100;
-      
+      const baseShare = Math.round((convertToBaseCurrency(numericAmount, normalizedCurrency) / count) * 100) / 100;
+
       targetUserIds.forEach((uId, idx) => {
-        // Adjust the last share to ensure exact sum matches amount
         const finalShare = idx === count - 1 ? (numericAmount - shareAmount * (count - 1)) : shareAmount;
+        const finalBaseShare = idx === count - 1 ? (convertToBaseCurrency(numericAmount, normalizedCurrency) - baseShare * (count - 1)) : baseShare;
         calculatedShares.push({
           userId: uId,
           amount: Math.round(finalShare * 100) / 100,
+          amountInBase: Math.round(finalBaseShare * 100) / 100,
           percentage: Math.round((100 / count) * 100) / 100
         });
       });
@@ -75,16 +113,28 @@ async function createExpense(req, res) {
       }
 
       let sumShares = 0;
-      shares.forEach(s => {
-        sumShares += parseFloat(s.amount);
+      const activeUserIds = new Set(activeMembers.map(m => m.userId));
+
+      for (const share of shares) {
+        const userId = parseInt(share.userId);
+        const shareAmount = parseFloat(share.amount);
+
+        if (!activeUserIds.has(userId)) {
+          return res.status(400).json({ error: 'One or more split members are not active on the selected expense date.' });
+        }
+        if (isNaN(shareAmount) || shareAmount < 0) {
+          return res.status(400).json({ error: 'Exact split shares must be valid non-negative numbers.' });
+        }
+
+        sumShares += shareAmount;
         calculatedShares.push({
-          userId: parseInt(s.userId),
-          amount: parseFloat(s.amount),
+          userId,
+          amount: Math.round(shareAmount * 100) / 100,
+          amountInBase: Math.round((convertToBaseCurrency(shareAmount, normalizedCurrency) / numericAmount) * convertToBaseCurrency(numericAmount, normalizedCurrency) * 100) / 100,
           percentage: null
         });
-      });
+      }
 
-      // Verify exact sum matches amount
       sumShares = Math.round(sumShares * 100) / 100;
       const targetAmt = Math.round(numericAmount * 100) / 100;
       if (Math.abs(sumShares - targetAmt) > 0.05) {
@@ -97,37 +147,53 @@ async function createExpense(req, res) {
       }
 
       let sumPercentage = 0;
-      shares.forEach(s => {
+      const activeUserIds = new Set(activeMembers.map(m => m.userId));
+
+      shares.forEach((s) => {
+        const userId = parseInt(s.userId);
         const pct = parseFloat(s.percentage);
+        if (!activeUserIds.has(userId)) {
+          return;
+        }
         sumPercentage += pct;
-        
+
         const shareAmt = Math.round(((pct / 100) * numericAmount) * 100) / 100;
+        const shareBaseAmt = Math.round(((pct / 100) * convertToBaseCurrency(numericAmount, normalizedCurrency)) * 100) / 100;
         calculatedShares.push({
-          userId: parseInt(s.userId),
+          userId,
           amount: shareAmt,
+          amountInBase: shareBaseAmt,
           percentage: pct
         });
       });
 
-      // Verify percentages sum to 100
+      if (calculatedShares.length !== shares.length) {
+        return res.status(400).json({ error: 'One or more split members are not active on the selected expense date.' });
+      }
+
       sumPercentage = Math.round(sumPercentage * 100) / 100;
       if (Math.abs(sumPercentage - 100) > 0.01) {
         return res.status(400).json({ error: `Sum of percentages (${sumPercentage}%) does not equal 100%.` });
       }
 
-      // Adjust the last share to ensure exact sum matches amount
       const currentSum = calculatedShares.reduce((acc, s) => acc + s.amount, 0);
       const diff = numericAmount - currentSum;
       if (Math.abs(diff) > 0 && calculatedShares.length > 0) {
         calculatedShares[calculatedShares.length - 1].amount = Math.round((calculatedShares[calculatedShares.length - 1].amount + diff) * 100) / 100;
       }
+
+      const currentBaseSum = calculatedShares.reduce((acc, s) => acc + s.amountInBase, 0);
+      const baseDiff = convertToBaseCurrency(numericAmount, normalizedCurrency) - currentBaseSum;
+      if (Math.abs(baseDiff) > 0 && calculatedShares.length > 0) {
+        calculatedShares[calculatedShares.length - 1].amountInBase = Math.round((calculatedShares[calculatedShares.length - 1].amountInBase + baseDiff) * 100) / 100;
+      }
     }
 
-    // Verify all share users are members of the group
-    const memberIdSet = new Set(group.members.map(m => m.userId));
+    // Verify all share users are active members on the expense date
+    const activeIds = new Set(activeMembers.map(m => m.userId));
     for (let s of calculatedShares) {
-      if (!memberIdSet.has(s.userId)) {
-        return res.status(400).json({ error: `User with ID '${s.userId}' in split details is not a member of this group.` });
+      if (!activeIds.has(s.userId)) {
+        return res.status(400).json({ error: `User with ID '${s.userId}' in split details is not active in the group for this expense date.` });
       }
     }
 
@@ -137,9 +203,10 @@ async function createExpense(req, res) {
         data: {
           title: title.trim(),
           amount: numericAmount,
-          currency: currency ? currency.toUpperCase().trim() : 'INR',
+          currency: normalizedCurrency,
+          amountInBase: convertToBaseCurrency(numericAmount, normalizedCurrency),
           category: category ? category.trim() : 'Others',
-          date: date ? new Date(date) : new Date(),
+          date: expenseDate,
           paidById: parseInt(paidById),
           groupId: parseInt(groupId),
           splitType
@@ -154,6 +221,7 @@ async function createExpense(req, res) {
               expenseId: expense.id,
               userId: s.userId,
               amount: s.amount,
+              amountInBase: s.amountInBase ?? Math.round((s.amount / numericAmount) * convertToBaseCurrency(numericAmount, normalizedCurrency) * 100) / 100,
               percentage: s.percentage
             }
           })

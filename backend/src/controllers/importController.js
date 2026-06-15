@@ -37,8 +37,15 @@ async function importExpensesCSV(req, res) {
       return res.status(404).json({ error: 'Group not found.' });
     }
 
-    // Perform CSV parsing and validation
-    const { validExpenses, invalidRows } = validateExpenseCSV(csvContent, group.members);
+    // Perform CSV parsing and validation using membership history
+    const groupMembersWithDates = group.members.map(m => ({
+      userId: m.userId,
+      email: m.user.email.toLowerCase(),
+      joinedAt: m.joinedAt,
+      leftAt: m.leftAt
+    }));
+
+    const { validExpenses, invalidRows } = validateExpenseCSV(csvContent, groupMembersWithDates);
 
     const totalRows = validExpenses.length + invalidRows.length;
     let importedRows = 0;
@@ -55,6 +62,7 @@ async function importExpensesCSV(req, res) {
               title: exp.title,
               amount: exp.amount,
               currency: exp.currency,
+              amountInBase: exp.amountInBase,
               category: exp.category,
               date: exp.date,
               paidById: exp.paidById,
@@ -71,6 +79,7 @@ async function importExpensesCSV(req, res) {
                   expenseId: createdExp.id,
                   userId: s.userId,
                   amount: s.amount,
+                  amountInBase: s.amountInBase,
                   percentage: s.percentage
                 }
               })

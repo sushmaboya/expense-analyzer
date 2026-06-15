@@ -47,6 +47,7 @@ model GroupMember {
   groupId  Int
   userId   Int
   joinedAt DateTime @default(now())
+  leftAt   DateTime?
   group    Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -58,6 +59,7 @@ model Expense {
   title       String
   amount      Float
   currency    String         @default("INR") // "INR" or "USD"
+  amountInBase Float
   category    String         @default("Others")
   splitType   String         // "EQUAL", "EXACT", "PERCENTAGE"
   date        DateTime       @default(now())
@@ -71,15 +73,16 @@ model Expense {
 }
 
 model ExpenseShare {
-  id         Int      @id @default(autoincrement())
-  expenseId  Int
-  userId     Int
-  amount     Float
-  percentage Float?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  expense    Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             Int      @id @default(autoincrement())
+  expenseId      Int
+  userId         Int
+  amount         Float
+  amountInBase   Float
+  percentage     Float?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  expense        Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([expenseId, userId])
 }
@@ -99,14 +102,26 @@ model Settlement {
 }
 
 model ImportReport {
-  id           Int      @id @default(autoincrement())
+  id           Int               @id @default(autoincrement())
   userId       Int
   fileName     String
-  status       String   // "SUCCESS", "FAILED", "PARTIAL"
+  status       String            // "SUCCESS", "FAILED", "PARTIAL"
   totalRows    Int
   importedRows Int
   failedRows   Int
-  errorLog     String?  // Text description of errors
-  createdAt    DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  errorLog     String?           // Text description of aggregate issues
+  rows         ImportReportRow[]
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ImportReportRow {
+  id           Int        @id @default(autoincrement())
+  reportId     Int
+  rowNumber    Int
+  rawData      String
+  issue        String
+  action       String
+  createdAt    DateTime   @default(now())
+  report       ImportReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 }

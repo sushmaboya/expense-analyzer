@@ -13,8 +13,9 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Enable CORS for frontend communications
+const corsOrigin = process.env.CORS_ORIGIN || '*';
 app.use(cors({
-  origin: '*', // For local development simplicity; can restrict to frontend dev port (e.g. localhost:5173) in production
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
