@@ -15,8 +15,8 @@ SplitWise Expense Analyzer is a premium full-stack web application for tracking 
 
 * **Frontend**: React.js, Vite, Tailwind CSS, Axios, Recharts (visualizations), Lucide React (icons).
 * **Backend**: Node.js, Express.js.
-* **Database**: PostgreSQL (configured for production) / SQLite (pre-configured for zero-friction local development) via Prisma ORM.
-* **Authentication**: JWT (JSON Web Tokens) with client-side header injection and Server bcrypt password hashing.
+* **Database**: PostgreSQL via Prisma ORM.
+* **Authentication**: JWT (JSON Web Tokens) with client-side header injection and bcrypt password hashing.
 
 ---
 
@@ -55,10 +55,10 @@ SplitWise Expense Analyzer is a premium full-stack web application for tracking 
    ```
 
 3. **Database Migration (Prisma)**:
-   Navigate to the `backend/` directory, set up the SQLite database, and generate the Prisma Client:
+   Navigate to the `backend/` directory, configure `backend/.env` with your Neon PostgreSQL `DATABASE_URL`, and generate the Prisma Client:
    ```bash
    cd backend
-   npx prisma migrate dev --name init
+   npx prisma generate
    cd ..
    ```
 
@@ -76,11 +76,11 @@ SplitWise Expense Analyzer is a premium full-stack web application for tracking 
 Create a `.env` file inside the `backend` folder:
 ```env
 PORT=5000
-DATABASE_URL="file:./dev.db"
+DATABASE_URL="postgresql://<USER>:<PASSWORD>@<HOST>:5432/<DATABASE>?schema=public"
 JWT_SECRET="your-jwt-signing-secret-key-change-in-production"
 ```
 
-*Note: For production, uncomment the PostgreSQL provider inside `backend/prisma/schema.prisma` and update your `DATABASE_URL` with your PostgreSQL server connection string.*
+*Note: Replace the `DATABASE_URL` above with your Neon PostgreSQL connection string.*
 
 ---
 
@@ -107,7 +107,22 @@ JWT_SECRET="your-jwt-signing-secret-key-change-in-production"
 4. Vercel will auto-detect Vite settings:
    * **Build Command**: `npm run build`
    * **Output Directory**: `dist`
-5. Click **Deploy**.
+5. Add the environment variable in Vercel:
+   * `VITE_API_URL=https://expense-analyzer-api-i4ob.onrender.com/api`
+6. Click **Deploy**.
+
+### 3. **Render Backend Deployment**
+1. Go to [Render](https://render.com) and create a new **Web Service**.
+2. Connect your GitHub repository and choose the `main` branch.
+3. Set the **Root Directory** to `backend`.
+4. Configure these commands:
+   * **Build Command**: `npm install && npx prisma generate`
+   * **Start Command**: `npm start`
+5. Add required environment variables:
+   * `DATABASE_URL`
+   * `JWT_SECRET`
+   * `CORS_ORIGIN`
+6. Deploy the service.
 
 ---
 

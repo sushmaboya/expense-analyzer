@@ -1,0 +1,14 @@
+{
+  "version": 3,
+  "projects": [
+    {
+      "name": "expense-analyzer-frontend",
+      "rootDirectory": "frontend",
+      "buildCommand": "npm install && npm run build",
+      "outputDirectory": "frontend/dist",
+      "env": {
+        "VITE_API_URL": "https://expense-analyzer-api-i4ob.onrender.com/api"
+      }
+    }
+  ]
+}

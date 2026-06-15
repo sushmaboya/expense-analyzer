@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: expense-analyzer-backend
+    env: node
+    region: oregon
+    branch: main
+    root: backend
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        value: "<YOUR_NEON_DATABASE_URL>"
+      - key: JWT_SECRET
+        value: "<YOUR_JWT_SECRET>"
+      - key: CORS_ORIGIN
+        value: "https://expense-analyzer-frontend.vercel.app,http://localhost:5173"

@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "generate": "npx prisma generate",
+    "db:push": "npx prisma db push",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
