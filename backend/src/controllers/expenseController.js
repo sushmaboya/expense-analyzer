@@ -308,7 +308,106 @@ async function getGroupExpenses(req, res) {
   }
 }
 
+async function updateExpense(req, res) {
+  try {
+    const expenseId = parseInt(req.params.id);
+    if (isNaN(expenseId)) {
+      return res.status(400).json({ error: 'Invalid expense ID.' });
+    }
+
+    const { title, amount, currency, category, date, paidById, splitType, shares } = req.body;
+    const numericAmount = parseFloat(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({ error: 'Expense amount must be a positive number.' });
+    }
+
+    const normalizedCurrency = normalizeCurrency(currency || 'INR');
+    if (!isSupportedCurrency(normalizedCurrency)) {
+      return res.status(400).json({ error: 'Currency must be INR or USD.' });
+    }
+
+    const expenseDate = date ? new Date(date) : null;
+    if (date && isNaN(expenseDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid expense date.' });
+    }
+
+    const expense = await prisma.expense.findUnique({ where: { id: expenseId } });
+    if (!expense) {
+      return res.status(404).json({ error: 'Expense not found.' });
+    }
+
+    const updatedExpense = await prisma.$transaction(async (tx) => {
+      await tx.expenseShare.deleteMany({ where: { expenseId } });
+
+      const expenseUpdate = await tx.expense.update({
+        where: { id: expenseId },
+        data: {
+          title: title != null ? title.trim() : expense.title,
+          amount: numericAmount,
+          currency: normalizedCurrency,
+          amountInBase: convertToBaseCurrency(numericAmount, normalizedCurrency),
+          category: category != null ? category.trim() : expense.category,
+          date: expenseDate || expense.date,
+          paidById: paidById != null ? parseInt(paidById) : expense.paidById,
+          splitType: splitType || expense.splitType
+        }
+      });
+
+      if (shares && Array.isArray(shares) && shares.length > 0) {
+        await Promise.all(shares.map(s => tx.expenseShare.create({
+          data: {
+            expenseId: expenseUpdate.id,
+            userId: parseInt(s.userId),
+            amount: parseFloat(s.amount),
+            amountInBase: parseFloat(s.amountInBase) || Math.round((parseFloat(s.amount) / numericAmount) * convertToBaseCurrency(numericAmount, normalizedCurrency) * 100) / 100,
+            percentage: s.percentage != null ? parseFloat(s.percentage) : null
+          }
+        })));
+      }
+
+      return tx.expense.findUnique({
+        where: { id: expenseUpdate.id },
+        include: {
+          paidBy: { select: { id: true, name: true, email: true, avatarUrl: true } },
+          shares: { include: { user: { select: { id: true, name: true, email: true, avatarUrl: true } } } }
+        }
+      });
+    });
+
+    return res.status(200).json({ message: 'Expense updated successfully.', expense: updatedExpense });
+  } catch (err) {
+    console.error('Update Expense Error:', err);
+    return res.status(500).json({ error: 'An error occurred while updating expense.' });
+  }
+}
+
+async function deleteExpense(req, res) {
+  try {
+    const expenseId = parseInt(req.params.id);
+    if (isNaN(expenseId)) {
+      return res.status(400).json({ error: 'Invalid expense ID.' });
+    }
+
+    const expense = await prisma.expense.findUnique({ where: { id: expenseId } });
+    if (!expense) {
+      return res.status(404).json({ error: 'Expense not found.' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.expenseShare.deleteMany({ where: { expenseId } });
+      await tx.expense.delete({ where: { id: expenseId } });
+    });
+
+    return res.status(200).json({ message: 'Expense deleted successfully.' });
+  } catch (err) {
+    console.error('Delete Expense Error:', err);
+    return res.status(500).json({ error: 'An error occurred while deleting expense.' });
+  }
+}
+
 module.exports = {
   createExpense,
-  getGroupExpenses
+  getGroupExpenses,
+  updateExpense,
+  deleteExpense
 };

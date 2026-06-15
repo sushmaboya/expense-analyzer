@@ -6,12 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
-  // For PostgreSQL, uncomment the following line and comment the above two lines.
-  // Make sure to update the DATABASE_URL in the .env file as well.
-  // provider = "postgresql"
-  // url      = env("DATABASE_URL")
 }
 
 model User {
